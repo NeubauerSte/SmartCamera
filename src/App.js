@@ -1,112 +1,159 @@
-// Import dependencies
-import React, { useRef, useState, useEffect } from "react";
-import * as tf from "@tensorflow/tfjs";
-import Webcam from "react-webcam";
+import React, { useEffect, useRef, useState } from 'react';
+import Webcam from 'react-webcam';
+import { drawRect } from "./utilities";
 import "./App.css";
-import { nextFrame } from "@tensorflow/tfjs";
-// 2. TODO - Import drawing utility here
-import {drawRect} from "./utilities"; 
+// React-Bootstrap Einbindung
+import { Form, FormControl, Button, Container, Row, Col } from "react-bootstrap";
+
+
+/******************
+ * How to Ausführen
+ * 
+ * npm install ausführen
+ * Abhängigkeiten installieren
+ * 
+ * Terminal öffnen, "node src/mailAPI.js"
+ * Startet den Mailserver
+ * 
+ * Zweites Terminal öffnen, "npm run electron-dev"
+ * Startet die App auf localhost
+ * 
+ * Drittes Terminal öffnen, "npm run electron"
+ * Startet die App als Desktopanwendung
+ ******************/
 
 function App() {
   const webcamRef = useRef(null);
+
+  const [devices, setDevices] = useState([]);
+
   const canvasRef = useRef(null);
 
-  // Main function
-  const runCoco = async () => {
-    // 3. TODO - Load network 
-    const net = await tf.loadGraphModel('https://livelong.s3.au-syd.cloud-object-storage.appdomain.cloud/model.json')
-    
-    // Loop and detect hands
-    setInterval(() => {
-      detect(net);
-    }, 16.7);
+  /* Webcam-Management (wechseln zwischen allen Geräten) */
+
+  // Setzt die gewählte Webcam
+  const setWebcam = async (deviceId) => {
+    if (!webcamRef.current) return;
+
+    // Stoppe das aktuelle Video
+    webcamRef.current.video.srcObject.getTracks().forEach(track => track.stop());
+
+    // Starte das neue Video
+    webcamRef.current.video.srcObject = await navigator.mediaDevices.getUserMedia({
+      video: { deviceId: deviceId }
+    });
   };
 
-  const detect = async (net) => {
-    // Check data is available
+
+  // Holt alle verfügbaren Webcams
+  const getDevices = async () => {
+    const deviceInfos = await navigator.mediaDevices.enumerateDevices();
+    setDevices(deviceInfos.filter(device => device.kind === 'videoinput'));
+  };
+
+
+  // Ausführung des COCO-Modells
+  const runCoco = async () => {
+    window.roboflow.auth({
+      publishable_key: "rf_uJRjOgRHyXdKGTSViuzUGjURjsb2"
+    }).load({
+      model: "aerith",
+      version: 3
+    }).then(function (model) {
+      // Scanne alle 20 ms den aktuellen Frame nach Objekten
+      setInterval(() => {
+        detect(model);
+      }, 100);
+    });
+  };
+
+
+
+  // Wenn sich die Geräte ändern, die angeschlossen sind, dann wird die Dropdown Liste aktualisiert.
+  useEffect(() => {
+    getDevices();
+  }, [devices]);
+
+
+  const detect = async (model) => {
+    // Checken, ob Webcam verfügbar ist
+
     if (
-      typeof webcamRef.current !== "undefined" &&
+      typeof webcamRef.current !== 'undefined' &&
       webcamRef.current !== null &&
       webcamRef.current.video.readyState === 4
     ) {
-      // Get Video Properties
+
+      // Video - Eigenschaften verarbeiten
       const video = webcamRef.current.video;
       const videoWidth = webcamRef.current.video.videoWidth;
       const videoHeight = webcamRef.current.video.videoHeight;
-
-      // Set video width
+  
       webcamRef.current.video.width = videoWidth;
       webcamRef.current.video.height = videoHeight;
-
-      // Set canvas height and width
+  
       canvasRef.current.width = videoWidth;
       canvasRef.current.height = videoHeight;
+  
+      // Detection-Daten erhalten
+      const detections = await model.detect(video);
 
-      // 4. TODO - Make Detections
-      const img = tf.browser.fromPixels(video)
-      const resized = tf.image.resizeBilinear(img, [640,480])
-      const casted = resized.cast('int32')
-      const expanded = casted.expandDims(0)
-      const obj = await net.executeAsync(expanded)
-      
-      const boxes = await obj[4].array()
-      const classes = await obj[5].array()
-      const scores = await obj[6].array()
-    
-      // Draw mesh
-      const ctx = canvasRef.current.getContext("2d");
 
-      // 5. TODO - Update drawing utility
-      // drawSomething(obj, ctx)  
-      requestAnimationFrame(()=>{drawRect(boxes[0], classes[0], scores[0], 0.9, videoWidth, videoHeight, ctx)}); 
-
-      tf.dispose(img)
-      tf.dispose(resized)
-      tf.dispose(casted)
-      tf.dispose(expanded)
-      tf.dispose(obj)
-
-    }
+      const ctx = canvasRef.current.getContext('2d');
+      requestAnimationFrame(() => {
+        drawRect(
+          detections,
+          ctx,
+          canvasRef,
+          webcamRef,
+          videoHeight, 
+          videoWidth
+        );
+      });
+    };
   };
+  
 
-  useEffect(()=>{runCoco()},[]);
+  // Beim Initialisieren Intervall für Scan einrichten mit diesem Modell
+  useEffect(() => { runCoco() }, []);
 
   return (
     <div className="App">
       <header className="App-header">
-        <Webcam
-          ref={webcamRef}
-          muted={true} 
-          style={{
-            position: "absolute",
-            marginLeft: "auto",
-            marginRight: "auto",
-            left: 0,
-            right: 0,
-            textAlign: "center",
-            zindex: 9,
-            width: 640,
-            height: 480,
-          }}
-        />
 
-        <canvas
-          ref={canvasRef}
-          style={{
-            position: "absolute",
-            marginLeft: "auto",
-            marginRight: "auto",
-            left: 0,
-            right: 0,
-            textAlign: "center",
-            zindex: 8,
-            width: 640,
-            height: 480,
-          }}
-        />
+        {/* Webcam-Auswahl - Selection Element - links im Header*/}
+        <Form.Control
+          as="select"
+          onChange={e => setWebcam(e.target.value)}
+          className="webcam-select shadow border p-3 text-center"
+        >
+          {devices.map(device => (
+            <option key={device.deviceId} value={device.deviceId}>
+              {device.label}
+            </option>
+          ))}
+        </Form.Control>
+
+
+        {/* Schriftzug in der Mitte im Header */}
+        <h1 className="App-title text-white" style={{ textAlign: 'center' }}>Aerith</h1>
+
+
+        {/* Logo auf der rechten Seite im Header */}
+        <img src="Logo_Smartcamera.png" alt="SmartCamera Logo" className="logo" />
+
       </header>
+
+
+      {/* Webcam-Komponente - 2 CSS Klassen eingebunden*/}
+
+      <Webcam className="App-webcam webcam-style" ref={webcamRef} muted={true} style={{ width: 640, height: 480}} />
+
+      {/* Canvas-Komponente */}
+      <canvas className="canvas-style" ref={canvasRef} />
     </div>
   );
+
 }
 
 export default App;
