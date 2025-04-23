@@ -2,8 +2,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import Webcam from 'react-webcam';
 import { drawRect } from "./utilities";
 import "./App.css";
-// React-Bootstrap Einbindung
-import { Form, FormControl, Button, Container, Row, Col } from "react-bootstrap";
+
+import { Form } from "react-bootstrap";
 
 
 /******************
